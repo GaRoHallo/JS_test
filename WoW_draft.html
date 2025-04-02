@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Space Battle</title>
+    <style>
+
+    </style>
+</head>
+<body>
+<div class="scoreboard">
+    <div>RED: <span id="redScore">0</span></div>
+    <div>BLUE: <span id="blueScore">0</span></div>
+</div>
+<div id="infoBox"></div>
+<canvas id="gameCanvas" width="600" height="400"></canvas>
+<script>
+
+// -------------------------- Data struct -------------------------
+class Ship {
+    constructor(team, x, y) {
+        this.team = team;
+        this.x = x;
+        this.y = y;
+        this.rz = Math.random() * Math.PI * 2;
+        this.speed = 0.1 + Math.random()*0.1;
+        this.health = 100;
+        this.lastFire = 0;
+        this.trail = [];
+    }
+    get color() {return this.team ? '#00f' : '#f00';  }
+}
+class Particle {
+    constructor(x, y,vx,vy,decay, color) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.size = 1;
+        this.decay = decay;
+        this.color = color;
+    }
+}
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const COLORS = { RED: '#f00', BLUE: '#00f', GRAY: '#666' };
+let team1 = [], team2 = [], particles = [], bullets = [];
+let gameOver = false, redScore = 0, blueScore = 0;
+
+// Initialize teams
+function initGame() {
+    team1 = []; team2 = []; particles = []; bullets = [];
+    for(let i = 0; i < 8; i++) {
+        const team = i % 2;
+        const x = team ? canvas.width * 0.75 : canvas.width * 0.25;
+        const y = canvas.height / 2 + (i - 4) * 40;
+        (team ? team2 : team1).push(new Ship(team, x, y));
+    }
+}
+
+// -------------------------- Draw functions -------------------------
+function drawShip(ship) {
+    ctx.save();
+    // Draw health bar
+    ctx.fillStyle = '#0f0';
+    ctx.fillRect(ship.x - 10, ship.y - 20, (ship.health / 5), 3);
+    // Draw ship shape
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(ship.rz);
+    ctx.fillStyle = ship.health > 0 ? ship.color : COLORS.GRAY;
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(4, 0);
+    ctx.lineTo(4, 10);
+    ctx.lineTo(-4, 10);
+    ctx.lineTo(-4, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+function drawBullets(ctx, bullets) {
+    bullets.forEach(bullet => {
+        ctx.fillStyle = bullet.team ? '#0ff' : '#f0f';
+        ctx.beginPath();
+        ctx.arc(bullet.x, bullet.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+function drawParticles(ctx, particles) {
+    particles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2 * p.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+// -------------------------- Physics functions -------------------------
+function updateParticles() {
+    particles = particles.filter(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.size -= p.decay;
+        return p.size > 0;
+    });
+}
+function createExplosion(x, y) {
+    for (let i = 0; i < 10; i++) {
+        particles.push(new Particle(x, y,Math.random()-0.5,Math.random()-0.5, 0.03 ,'#ffff00'));
+    }
+}
+function checkCollisions() {
+    bullets = bullets.filter(bullet => {
+        // Move bullet
+        bullet.x += Math.sin(bullet.angle) * bullet.speed;
+        bullet.y -= Math.cos(bullet.angle) * bullet.speed;
+        const targetTeam = bullet.team ? team1 : team2;
+        const hit = targetTeam.find(ship =>
+            ship.health > 0 &&
+            Math.hypot(ship.x - bullet.x, ship.y - bullet.y) < 10
+        );
+        // Bullet hit
+        if (hit) {
+            hit.health -= 10;
+            if (hit.health <= 0) {
+                if (bullet.team) { blueScore++; }
+                else { redScore++; }
+                document.getElementById(bullet.team ? 'blueScore' : 'redScore').textContent = bullet.team ? blueScore : redScore;
+            }
+            createExplosion(bullet.x, bullet.y);
+            return false;
+        }
+        return bullet.x > -50 && bullet.x < canvas.width + 50 &&
+               bullet.y > -50 && bullet.y < canvas.height + 50;
+    });
+}
+function updatePhysics(ship, deltaTime) {
+    if (ship.health <= 0) return;
+    // Move ship
+    ship.x += Math.sin(ship.rz) * ship.speed;
+    ship.y -= Math.cos(ship.rz) * ship.speed;
+    ship.rz += (Math.random() - 0.5) * 0.1;
+    if (ship.x < 0 || ship.x > canvas.width || ship.y < 0 || ship.y > canvas.height) {
+      ship.rz = ship.rz - 2;
+      if (ship.rz < -4) {ship.rz = ship.rz + 6.28;}
+    }
+    // Water trail
+    if (Math.random() < 0.5) {
+        particles.push(new Particle(
+            ship.x - Math.sin(ship.rz) * 11,
+            ship.y + Math.cos(ship.rz) * 11,
+            0,0,0.003,'#aaaaff'
+        ));
+    }
+    // Shoot bullet
+    if (Math.random() < 0.01) {
+        const now = Date.now();
+        if (now - ship.lastFire > 3000) {
+            bullets.push({
+                x: ship.x + Math.sin(ship.rz) * 15,
+                y: ship.y - Math.cos(ship.rz) * 15,
+                angle: ship.rz,
+                team: ship.team,
+                speed: 2
+            });
+            ship.lastFire = now;
+        }
+    }
+}
+
+// -------------------------- Main Loop -------------------------
+function gameLoop() {
+
+    ctx.fillStyle = '#7070f0';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const deltaTime = 26;
+
+    team1.concat(team2).forEach(ship => updatePhysics(ship, deltaTime));
+    checkCollisions();
+    updateParticles();
+
+    drawBullets(ctx, bullets);
+    drawParticles(ctx, particles);
+    team1.concat(team2).forEach(drawShip);
+
+    requestAnimationFrame(gameLoop);
+    //if (!gameOver) setTimeout(gameLoop, 33);
+}
+initGame();
+gameLoop();
+
+</script>
+</body>
+</html>
